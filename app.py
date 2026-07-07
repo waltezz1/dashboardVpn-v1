@@ -8,6 +8,8 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from dateutil.relativedelta import relativedelta
+import paramiko
+import re
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkeychangeit'
@@ -23,7 +25,7 @@ else:
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# ---------- Админ-пароль ----------
+# ---------- Админ-пароль (хеш) ----------
 ADMIN_PASSWORD_HASH = bcrypt.hashpw('admin'.encode(), bcrypt.gensalt()).decode()
 
 # ---------- Работа с настройками ----------
@@ -43,7 +45,7 @@ if not get_setting('monthly_price'):
 if not get_setting('yearly_price'):
     set_setting('yearly_price', '5000')
 
-# ---------- Вспомогательные функции ----------
+# ---------- Вспомогательные функции для работы с Firestore ----------
 def get_users():
     users_ref = db.collection('users')
     docs = users_ref.stream()
@@ -80,6 +82,80 @@ def add_log(action, details=''):
         'details': details,
         'created_at': datetime.now().isoformat()
     })
+
+# ---------- Мониторинг состояния сервера ----------
+def get_server_status():
+    """Получает состояние сервера по SSH (CPU, RAM, диск, uptime)"""
+    host = os.environ.get('VPS_HOST')
+    port = int(os.environ.get('VPS_PORT', 22))
+    username = os.environ.get('VPS_USERNAME', 'root')
+    password = os.environ.get('VPS_PASSWORD')
+    private_key_path = os.environ.get('VPS_SSH_KEY_PATH')
+
+    if not host or not password:
+        return {'error': 'Сервер не настроен', 'available': False}
+
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        if private_key_path:
+            key = paramiko.RSAKey.from_private_key_file(private_key_path)
+            ssh.connect(hostname=host, port=port, username=username, pkey=key, timeout=5)
+        else:
+            ssh.connect(hostname=host, port=port, username=username, password=password, timeout=5)
+
+        # CPU
+        stdin, stdout, stderr = ssh.exec_command("top -bn1 | grep 'Cpu(s)'")
+        cpu_line = stdout.read().decode()
+        cpu_match = re.search(r'(\d+\.\d+)\s*id', cpu_line)
+        cpu_usage = 100 - float(cpu_match.group(1)) if cpu_match else 0
+
+        # RAM
+        stdin, stdout, stderr = ssh.exec_command("free -m | grep Mem")
+        mem_line = stdout.read().decode()
+        mem_parts = mem_line.split()
+        if len(mem_parts) >= 3:
+            total_mem = int(mem_parts[1])
+            used_mem = int(mem_parts[2])
+            mem_percent = (used_mem / total_mem) * 100
+        else:
+            mem_percent = 0
+
+        # Диск
+        stdin, stdout, stderr = ssh.exec_command("df -h / | tail -1")
+        disk_line = stdout.read().decode()
+        disk_parts = disk_line.split()
+        if len(disk_parts) >= 5:
+            disk_percent = float(disk_parts[4].replace('%', ''))
+        else:
+            disk_percent = 0
+
+        # Uptime
+        stdin, stdout, stderr = ssh.exec_command("uptime -p")
+        uptime_line = stdout.read().decode().strip()
+        if not uptime_line:
+            uptime_line = "неизвестно"
+
+        ssh.close()
+
+        return {
+            'cpu': round(cpu_usage, 1),
+            'ram': round(mem_percent, 1),
+            'disk': round(disk_percent, 1),
+            'uptime': uptime_line,
+            'available': True,
+            'error': None
+        }
+
+    except Exception as e:
+        return {
+            'cpu': 0,
+            'ram': 0,
+            'disk': 0,
+            'uptime': '—',
+            'available': False,
+            'error': str(e)
+        }
 
 # ---------- Маршруты ----------
 @app.route('/')
@@ -125,12 +201,7 @@ def dashboard():
         'expense': expense,
         'balance': income - expense
     }
-    server_status = {
-        'cpu': 12.5,
-        'ram': 45.2,
-        'disk': 67.8,
-        'uptime': '5 дней 3 часа'
-    }
+    server_status = get_server_status()
     return render_template('dashboard.html', stats=stats, server=server_status)
 
 @app.route('/users')
@@ -160,10 +231,9 @@ def add_user():
     username = request.form['username']
     email = request.form['email']
     expires_at = request.form.get('expires_at') or None
-    tariff = request.form.get('tariff', 'month')  # по умолчанию месяц
+    tariff = request.form.get('tariff', 'month')
     amount_str = request.form.get('amount')
 
-    # Определяем сумму в зависимости от тарифа
     if tariff == 'month':
         amount = float(get_setting('monthly_price', '500'))
         if not expires_at:
@@ -174,7 +244,7 @@ def add_user():
         if not expires_at:
             new_date = datetime.now() + relativedelta(years=1)
             expires_at = new_date.isoformat()
-    else:  # custom – вручную
+    else:
         if amount_str and amount_str.strip():
             amount = float(amount_str)
         else:
@@ -183,13 +253,11 @@ def add_user():
                 new_date = datetime.now() + relativedelta(months=1)
                 expires_at = new_date.isoformat()
 
-    # Проверка дубликата
     existing = db.collection('users').where(filter=FieldFilter('username', '==', username)).get()
     if existing:
         flash('Пользователь с таким именем уже существует', 'danger')
         return redirect(url_for('users_page'))
-    
-    # Добавляем пользователя
+
     user_ref = db.collection('users').add({
         'username': username,
         'email': email,
@@ -197,8 +265,7 @@ def add_user():
         'is_active': True,
         'created_at': datetime.now().isoformat()
     })
-    
-    # Всегда создаём транзакцию, если сумма > 0
+
     if amount > 0:
         db.collection('transactions').add({
             'amount': amount,
@@ -210,7 +277,7 @@ def add_user():
         add_log(f'Добавлен пользователь {username} с оплатой {amount}₽', f'тариф: {tariff}, срок: {expires_at}')
     else:
         add_log(f'Добавлен пользователь {username} (без оплаты)', f'email: {email}, срок: {expires_at}')
-    
+
     flash(f'Пользователь {username} добавлен', 'success')
     return redirect(url_for('users_page'))
 

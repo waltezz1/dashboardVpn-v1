@@ -34,12 +34,21 @@
 
 <div class="card">
     <div class="card-title">Состояние сервера</div>
-    <div style="display: flex; flex-wrap: wrap; gap: 30px; margin-top: 8px;">
-        <div><strong>CPU</strong> {{ server.cpu }}% <span class="status-ok">✔</span></div>
-        <div><strong>RAM</strong> {{ server.ram }}% <span class="status-ok">✔</span></div>
-        <div><strong>Диск</strong> {{ server.disk }}% <span class="status-ok">✔</span></div>
-        <div><strong>Uptime</strong> {{ server.uptime }}</div>
-    </div>
+    {% if server.available %}
+        <div style="display: flex; flex-wrap: wrap; gap: 30px; margin-top: 8px;">
+            <div><strong>CPU</strong> {{ server.cpu }}% <span class="status-ok">✔</span></div>
+            <div><strong>RAM</strong> {{ server.ram }}% <span class="status-ok">✔</span></div>
+            <div><strong>Диск</strong> {{ server.disk }}% <span class="status-ok">✔</span></div>
+            <div><strong>Uptime</strong> {{ server.uptime }}</div>
+        </div>
+    {% else %}
+        <div style="color: #f85149; margin-top: 8px;">
+            ⚠️ Сервер недоступен. Проверьте настройки подключения.
+            {% if server.error %}
+                <br><span style="font-size: 13px; color: #8b949e;">Ошибка: {{ server.error }}</span>
+            {% endif %}
+        </div>
+    {% endif %}
 </div>
 
 <div class="card" style="display: flex; gap: 12px; flex-wrap: wrap;">

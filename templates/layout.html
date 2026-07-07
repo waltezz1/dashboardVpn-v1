@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VPN Admin</title>
+    <title>VORTEX dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <header class="header">
         <div class="container">
-            <div class="logo">VPN<span>Admin</span></div>
+            <div class="logo">VORTEX<span>dashboard</span></div>
             <nav class="nav">
                 <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Дашборд</a>
                 <a href="{{ url_for('users_page') }}" class="{% if request.endpoint == 'users_page' %}active{% endif %}">Пользователи</a>
