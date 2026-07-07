@@ -17,6 +17,10 @@
             <label>Срок до (ГГГГ-ММ-ДД)</label>
             <input type="date" name="expires_at" class="form-control">
         </div>
+        <div class="form-group" style="margin-bottom:0;">
+            <label>Сумма оплаты (₽, опционально)</label>
+            <input type="number" name="amount" class="form-control" step="0.01" placeholder="например, 500">
+        </div>
         <button type="submit" class="btn btn-primary" style="margin-bottom:2px;">+ Добавить</button>
     </form>
 </div>
@@ -29,6 +33,7 @@
                 <th>Имя</th>
                 <th>Email</th>
                 <th>Срок до</th>
+                <th>Осталось дней</th>
                 <th>Статус</th>
                 <th>Действия</th>
             </tr>
@@ -41,6 +46,17 @@
                 <td>{{ user.email or '—' }}</td>
                 <td>{{ user.expires_at or 'бессрочно' }}</td>
                 <td>
+                    {% if user.days_left is not none %}
+                        {% if user.days_left > 0 %}
+                            {{ user.days_left }} дн.
+                        {% else %}
+                            <span class="badge badge-danger">Истёк</span>
+                        {% endif %}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td>
                     {% if user.is_active %}
                         <span class="badge badge-success">Активен</span>
                     {% else %}
@@ -48,6 +64,9 @@
                     {% endif %}
                 </td>
                 <td>
+                    <form action="{{ url_for('renew_user', user_id=user.id) }}" method="post" style="display: inline-block;">
+                        <button type="submit" class="btn btn-sm btn-primary">Продлить на месяц</button>
+                    </form>
                     <a href="{{ url_for('toggle_user', user_id=user.id) }}" class="btn btn-sm btn-outline">
                         {% if user.is_active %}Заблокировать{% else %}Разблокировать{% endif %}
                     </a>
@@ -55,7 +74,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="6" style="text-align:center; padding:20px;">Нет пользователей</td></tr>
+            <tr><td colspan="7" style="text-align:center; padding:20px;">Нет пользователей</td></tr>
             {% endfor %}
         </tbody>
     </table>
