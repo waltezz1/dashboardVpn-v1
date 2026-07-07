@@ -7,25 +7,23 @@ import bcrypt
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
-from dateutil.relativedelta import relativedelta  # для добавления месяца
+from dateutil.relativedelta import relativedelta
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkeychangeit'
 
 # ---------- Инициализация Firebase ----------
-# Используем переменную окружения FIREBASE_CREDENTIALS (на Render) или файл (локально)
 firebase_creds_json = os.environ.get('FIREBASE_CREDENTIALS')
 if firebase_creds_json:
     cred_dict = json.loads(firebase_creds_json)
     cred = credentials.Certificate(cred_dict)
 else:
-    # Для локальной разработки (файл должен лежать рядом с app.py)
     cred = credentials.Certificate("firebase-key.json")
 
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# ---------- Админ-пароль (хеш) ----------
+# ---------- Админ-пароль ----------
 ADMIN_PASSWORD_HASH = bcrypt.hashpw('admin'.encode(), bcrypt.gensalt()).decode()
 
 # ---------- Работа с настройками ----------
@@ -39,11 +37,13 @@ def get_setting(key, default=None):
 def set_setting(key, value):
     db.collection('settings').document(key).set({'value': value})
 
-# Устанавливаем цену по умолчанию, если её нет
+# Устанавливаем цены по умолчанию, если их нет
 if not get_setting('monthly_price'):
     set_setting('monthly_price', '500')
+if not get_setting('yearly_price'):
+    set_setting('yearly_price', '5000')
 
-# ---------- Вспомогательные функции для работы с Firestore ----------
+# ---------- Вспомогательные функции ----------
 def get_users():
     users_ref = db.collection('users')
     docs = users_ref.stream()
@@ -139,7 +139,6 @@ def users_page():
         return redirect(url_for('login'))
     users = get_users()
     now = datetime.now()
-    # Добавляем рассчёт оставшихся дней
     for user in users:
         if user.get('expires_at'):
             try:
@@ -150,7 +149,9 @@ def users_page():
                 user['days_left'] = None
         else:
             user['days_left'] = None
-    return render_template('users.html', users=users, now=now)
+    monthly_price = get_setting('monthly_price', '500')
+    yearly_price = get_setting('yearly_price', '5000')
+    return render_template('users.html', users=users, now=now, monthly_price=monthly_price, yearly_price=yearly_price)
 
 @app.route('/add_user', methods=['POST'])
 def add_user():
@@ -159,12 +160,35 @@ def add_user():
     username = request.form['username']
     email = request.form['email']
     expires_at = request.form.get('expires_at') or None
-    amount = request.form.get('amount')  # необязательное поле
-    # Проверка на дубликат
+    tariff = request.form.get('tariff', 'month')  # по умолчанию месяц
+    amount_str = request.form.get('amount')
+
+    # Определяем сумму в зависимости от тарифа
+    if tariff == 'month':
+        amount = float(get_setting('monthly_price', '500'))
+        if not expires_at:
+            new_date = datetime.now() + relativedelta(months=1)
+            expires_at = new_date.isoformat()
+    elif tariff == 'year':
+        amount = float(get_setting('yearly_price', '5000'))
+        if not expires_at:
+            new_date = datetime.now() + relativedelta(years=1)
+            expires_at = new_date.isoformat()
+    else:  # custom – вручную
+        if amount_str and amount_str.strip():
+            amount = float(amount_str)
+        else:
+            amount = float(get_setting('monthly_price', '500'))
+            if not expires_at:
+                new_date = datetime.now() + relativedelta(months=1)
+                expires_at = new_date.isoformat()
+
+    # Проверка дубликата
     existing = db.collection('users').where(filter=FieldFilter('username', '==', username)).get()
     if existing:
         flash('Пользователь с таким именем уже существует', 'danger')
         return redirect(url_for('users_page'))
+    
     # Добавляем пользователя
     user_ref = db.collection('users').add({
         'username': username,
@@ -173,18 +197,20 @@ def add_user():
         'is_active': True,
         'created_at': datetime.now().isoformat()
     })
-    # Если указана сумма, добавляем транзакцию дохода
-    if amount and float(amount) > 0:
+    
+    # Всегда создаём транзакцию, если сумма > 0
+    if amount > 0:
         db.collection('transactions').add({
-            'amount': float(amount),
+            'amount': amount,
             'type': 'income',
-            'description': f'Оплата за пользователя {username}',
+            'description': f'Оплата за пользователя {username} ({tariff})',
             'created_at': datetime.now().isoformat(),
-            'user_id': user_ref[1].id  # ID документа
+            'user_id': user_ref[1].id
         })
-        add_log(f'Добавлен пользователь {username} с оплатой {amount}₽', f'email: {email}, срок: {expires_at}')
+        add_log(f'Добавлен пользователь {username} с оплатой {amount}₽', f'тариф: {tariff}, срок: {expires_at}')
     else:
-        add_log(f'Добавлен пользователь {username}', f'email: {email}, срок: {expires_at}')
+        add_log(f'Добавлен пользователь {username} (без оплаты)', f'email: {email}, срок: {expires_at}')
+    
     flash(f'Пользователь {username} добавлен', 'success')
     return redirect(url_for('users_page'))
 
@@ -213,7 +239,6 @@ def delete_user(user_id):
 def renew_user(user_id):
     if not session.get('admin'):
         return redirect(url_for('login'))
-    # Получаем цену из настроек
     monthly_price = float(get_setting('monthly_price', '500'))
     user_ref = db.collection('users').document(user_id)
     user = user_ref.get()
@@ -221,7 +246,6 @@ def renew_user(user_id):
         flash('Пользователь не найден', 'danger')
         return redirect(url_for('users_page'))
     user_data = user.to_dict()
-    # Обновляем expires_at
     current_expires = user_data.get('expires_at')
     if current_expires:
         try:
@@ -233,7 +257,6 @@ def renew_user(user_id):
         new_date = datetime.now() + relativedelta(months=1)
     new_expires = new_date.isoformat()
     user_ref.update({'expires_at': new_expires})
-    # Добавляем транзакцию дохода
     db.collection('transactions').add({
         'amount': monthly_price,
         'type': 'income',
@@ -287,14 +310,17 @@ def settings_page():
             ADMIN_PASSWORD_HASH = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
             add_log('Смена пароля администратора')
             flash('Пароль изменён', 'success')
-        # Сохраняем цену за месяц
         monthly_price = request.form.get('monthly_price')
+        yearly_price = request.form.get('yearly_price')
         if monthly_price:
             set_setting('monthly_price', monthly_price)
-            flash('Тарифы сохранены', 'success')
+        if yearly_price:
+            set_setting('yearly_price', yearly_price)
+        flash('Тарифы сохранены', 'success')
         return redirect(url_for('settings_page'))
     monthly_price = get_setting('monthly_price', '500')
-    return render_template('settings.html', monthly_price=monthly_price)
+    yearly_price = get_setting('yearly_price', '5000')
+    return render_template('settings.html', monthly_price=monthly_price, yearly_price=yearly_price)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
