@@ -14,16 +14,41 @@
             <input type="email" name="email" class="form-control" placeholder="email@example.com">
         </div>
         <div class="form-group" style="margin-bottom:0;">
-            <label>Срок до (ГГГГ-ММ-ДД)</label>
+            <label>Срок до (ГГГГ-ММ-ДД) — опционально</label>
             <input type="date" name="expires_at" class="form-control">
         </div>
         <div class="form-group" style="margin-bottom:0;">
-            <label>Сумма оплаты (₽, опционально)</label>
-            <input type="number" name="amount" class="form-control" step="0.01" placeholder="например, 500">
+            <label>Тариф</label>
+            <select name="tariff" class="form-control" id="tariff-select" onchange="updateAmount()">
+                <option value="custom">Своя сумма</option>
+                <option value="month">Месяц ({{ monthly_price }} ₽)</option>
+                <option value="year">Год ({{ yearly_price }} ₽)</option>
+            </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+            <label>Сумма (₽)</label>
+            <input type="number" name="amount" id="amount-input" class="form-control" step="0.01" placeholder="0">
         </div>
         <button type="submit" class="btn btn-primary" style="margin-bottom:2px;">+ Добавить</button>
     </form>
 </div>
+
+<script>
+function updateAmount() {
+    const tariff = document.getElementById('tariff-select').value;
+    const amountInput = document.getElementById('amount-input');
+    if (tariff === 'month') {
+        amountInput.value = {{ monthly_price }};
+        amountInput.readOnly = true;
+    } else if (tariff === 'year') {
+        amountInput.value = {{ yearly_price }};
+        amountInput.readOnly = true;
+    } else {
+        amountInput.value = '';
+        amountInput.readOnly = false;
+    }
+}
+</script>
 
 <div class="table-wrap">
     <table>
