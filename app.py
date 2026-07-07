@@ -1,6 +1,8 @@
+# app.py
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from datetime import datetime
 import os
+import json
 import bcrypt
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -10,12 +12,20 @@ app = Flask(__name__)
 app.secret_key = 'supersecretkeychangeit'
 
 # ---------- Инициализация Firebase ----------
-# Используем файл с ключами
-cred = credentials.Certificate("firebase-key.json")
+# Используем переменную окружения FIREBASE_CREDENTIALS (на Render) или файл (локально)
+firebase_creds_json = os.environ.get('FIREBASE_CREDENTIALS')
+if firebase_creds_json:
+    cred_dict = json.loads(firebase_creds_json)
+    cred = credentials.Certificate(cred_dict)
+else:
+    # Для локальной разработки (файл должен лежать рядом с app.py)
+    cred = credentials.Certificate("firebase-key.json")
+
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
 # ---------- Админ-пароль (хеш) ----------
+# Для безопасности храните реальный пароль в переменной окружения, но для демо используем 'admin'
 ADMIN_PASSWORD_HASH = bcrypt.hashpw('admin'.encode(), bcrypt.gensalt()).decode()
 
 # ---------- Вспомогательные функции для работы с Firestore ----------
@@ -100,6 +110,7 @@ def dashboard():
         'expense': expense,
         'balance': income - expense
     }
+    # Статус сервера — пока заглушка
     server_status = {
         'cpu': 12.5,
         'ram': 45.2,
