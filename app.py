@@ -25,7 +25,6 @@ firebase_admin.initialize_app(cred)
 db = firestore.client()
 
 # ---------- Админ-пароль (хеш) ----------
-# Для безопасности храните реальный пароль в переменной окружения, но для демо используем 'admin'
 ADMIN_PASSWORD_HASH = bcrypt.hashpw('admin'.encode(), bcrypt.gensalt()).decode()
 
 # ---------- Вспомогательные функции для работы с Firestore ----------
@@ -110,7 +109,6 @@ def dashboard():
         'expense': expense,
         'balance': income - expense
     }
-    # Статус сервера — пока заглушка
     server_status = {
         'cpu': 12.5,
         'ram': 45.2,
