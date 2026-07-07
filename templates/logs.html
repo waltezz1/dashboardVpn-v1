@@ -1,0 +1,28 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<h1 style="font-weight: 300; margin-bottom: 20px; color: #f0f6fc;">Логи действий</h1>
+
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Время</th>
+                <th>Действие</th>
+                <th>Детали</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr>
+                <td>{{ log.created_at }}</td>
+                <td><strong>{{ log.action }}</strong></td>
+                <td>{{ log.details or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="3" style="text-align:center; padding:20px;">Логов пока нет</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

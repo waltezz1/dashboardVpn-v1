@@ -1,0 +1,33 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<h1 style="font-weight: 300; margin-bottom: 20px; color: #f0f6fc;">Настройки</h1>
+
+<div class="card">
+    <h3 style="font-weight: 400; margin-bottom: 16px; color: #f0f6fc;">Смена пароля администратора</h3>
+    <form method="post">
+        <div class="form-group">
+            <label>Новый пароль</label>
+            <input type="password" name="new_password" class="form-control" placeholder="Введите новый пароль" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Сменить пароль</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3 style="font-weight: 400; margin-bottom: 16px; color: #f0f6fc;">Тарифы</h3>
+    <form method="post">
+        <div class="form-row">
+            <div class="form-group">
+                <label>Цена за месяц (₽)</label>
+                <input type="number" name="monthly_price" class="form-control" value="{{ monthly_price }}" step="10">
+            </div>
+            <div class="form-group">
+                <label>Цена за год (₽)</label>
+                <input type="number" name="yearly_price" class="form-control" value="{{ yearly_price }}" step="10">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Сохранить тарифы</button>
+    </form>
+</div>
+{% endblock %}

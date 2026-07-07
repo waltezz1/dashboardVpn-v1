@@ -1,0 +1,49 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<h1 style="font-weight: 300; margin-bottom: 20px; color: #f0f6fc;">Дашборд</h1>
+
+<div class="stats-grid">
+    <div class="card">
+        <div class="card-title">Всего пользователей</div>
+        <div class="card-value">{{ stats.total_users }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Активные</div>
+        <div class="card-value" style="color: #3fb950;">{{ stats.active_users }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Неактивные</div>
+        <div class="card-value" style="color: #f85149;">{{ stats.inactive_users }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Доходы (₽)</div>
+        <div class="card-value">{{ stats.income }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Расходы (₽)</div>
+        <div class="card-value">{{ stats.expense }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Баланс (₽)</div>
+        <div class="card-value" style="color: {% if stats.balance >= 0 %}#3fb950{% else %}#f85149{% endif %};">
+            {{ stats.balance }}
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">Состояние сервера</div>
+    <div style="display: flex; flex-wrap: wrap; gap: 30px; margin-top: 8px;">
+        <div><strong>CPU</strong> {{ server.cpu }}% <span class="status-ok">✔</span></div>
+        <div><strong>RAM</strong> {{ server.ram }}% <span class="status-ok">✔</span></div>
+        <div><strong>Диск</strong> {{ server.disk }}% <span class="status-ok">✔</span></div>
+        <div><strong>Uptime</strong> {{ server.uptime }}</div>
+    </div>
+</div>
+
+<div class="card" style="display: flex; gap: 12px; flex-wrap: wrap;">
+    <a href="{{ url_for('users_page') }}" class="btn btn-primary">Управление пользователями</a>
+    <a href="{{ url_for('finances_page') }}" class="btn btn-primary">Добавить транзакцию</a>
+</div>
+{% endblock %}
