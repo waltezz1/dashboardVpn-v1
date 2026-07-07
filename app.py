@@ -1,92 +1,60 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
-import sqlite3
+from datetime import datetime
 import os
-from datetime import datetime, timedelta
 import bcrypt
+import firebase_admin
+from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkeychangeit'
 
-# ---------- Работа с БД ----------
-def get_db():
-    db = sqlite3.connect('vpn.db')
-    db.row_factory = sqlite3.Row
-    return db
-
-def init_db():
-    db = get_db()
-    db.executescript('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT,
-            expires_at TEXT,
-            is_active INTEGER DEFAULT 1,
-            last_handshake TEXT,
-            rx INTEGER DEFAULT 0,
-            tx INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            amount REAL NOT NULL,
-            type TEXT CHECK(type IN ('income','expense')) NOT NULL,
-            description TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            user_id INTEGER REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            action TEXT NOT NULL,
-            details TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        );
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_price', '500');
-        INSERT OR IGNORE INTO settings (key, value) VALUES ('yearly_price', '5000');
-    ''')
-    db.commit()
-    db.close()
-
-# Создаём таблицы при первом запуске
-init_db()
-
-# ---------- Вспомогательные функции ----------
-def get_users():
-    db = get_db()
-    users = db.execute('SELECT * FROM users ORDER BY id DESC').fetchall()
-    db.close()
-    return users
-
-def get_transactions():
-    db = get_db()
-    trans = db.execute('SELECT * FROM transactions ORDER BY id DESC').fetchall()
-    db.close()
-    return trans
-
-def get_logs():
-    db = get_db()
-    logs = db.execute('SELECT * FROM logs ORDER BY id DESC LIMIT 50').fetchall()
-    db.close()
-    return logs
-
-def add_log(action, details=''):
-    db = get_db()
-    db.execute('INSERT INTO logs (action, details) VALUES (?, ?)', (action, details))
-    db.commit()
-    db.close()
-
-def get_setting(key):
-    db = get_db()
-    row = db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
-    db.close()
-    return row['value'] if row else None
+# ---------- Инициализация Firebase ----------
+# Используем файл с ключами
+cred = credentials.Certificate("firebase-key.json")
+firebase_admin.initialize_app(cred)
+db = firestore.client()
 
 # ---------- Админ-пароль (хеш) ----------
-# Для простоты храним хеш прямо в коде (в реальности лучше в БД или env)
 ADMIN_PASSWORD_HASH = bcrypt.hashpw('admin'.encode(), bcrypt.gensalt()).decode()
+
+# ---------- Вспомогательные функции для работы с Firestore ----------
+def get_users():
+    users_ref = db.collection('users')
+    docs = users_ref.stream()
+    users_list = []
+    for doc in docs:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        users_list.append(data)
+    return users_list
+
+def get_transactions():
+    trans_ref = db.collection('transactions').order_by('created_at', direction=firestore.Query.DESCENDING)
+    docs = trans_ref.stream()
+    trans_list = []
+    for doc in docs:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        trans_list.append(data)
+    return trans_list
+
+def get_logs(limit=50):
+    logs_ref = db.collection('logs').order_by('created_at', direction=firestore.Query.DESCENDING).limit(limit)
+    docs = logs_ref.stream()
+    logs_list = []
+    for doc in docs:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        logs_list.append(data)
+    return logs_list
+
+def add_log(action, details=''):
+    db.collection('logs').add({
+        'action': action,
+        'details': details,
+        'created_at': datetime.now().isoformat()
+    })
 
 # ---------- Маршруты ----------
 @app.route('/')
@@ -119,12 +87,11 @@ def logout():
 def dashboard():
     if not session.get('admin'):
         return redirect(url_for('login'))
-    db = get_db()
-    total_users = db.execute('SELECT COUNT(*) FROM users').fetchone()[0]
-    active_users = db.execute('SELECT COUNT(*) FROM users WHERE is_active=1 AND (expires_at IS NULL OR expires_at > date("now"))').fetchone()[0]
-    income = db.execute('SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type="income"').fetchone()[0]
-    expense = db.execute('SELECT COALESCE(SUM(amount),0) FROM transactions WHERE type="expense"').fetchone()[0]
-    db.close()
+    users = get_users()
+    total_users = len(users)
+    active_users = sum(1 for u in users if u.get('is_active', False))
+    income = sum(t.get('amount', 0) for t in get_transactions() if t.get('type') == 'income')
+    expense = sum(t.get('amount', 0) for t in get_transactions() if t.get('type') == 'expense')
     stats = {
         'total_users': total_users,
         'active_users': active_users,
@@ -133,7 +100,6 @@ def dashboard():
         'expense': expense,
         'balance': income - expense
     }
-    # Статус сервера (заглушка, но можно добавить psutil)
     server_status = {
         'cpu': 12.5,
         'ram': 45.2,
@@ -156,42 +122,41 @@ def add_user():
     username = request.form['username']
     email = request.form['email']
     expires_at = request.form.get('expires_at') or None
-    db = get_db()
-    try:
-        db.execute('INSERT INTO users (username, email, expires_at) VALUES (?, ?, ?)',
-                   (username, email, expires_at))
-        db.commit()
-        add_log(f'Добавлен пользователь {username}', f'email: {email}, срок: {expires_at}')
-        flash(f'Пользователь {username} добавлен', 'success')
-    except sqlite3.IntegrityError:
+    # Проверка на дубликат
+    existing = db.collection('users').where(filter=FieldFilter('username', '==', username)).get()
+    if existing:
         flash('Пользователь с таким именем уже существует', 'danger')
-    db.close()
+        return redirect(url_for('users_page'))
+    db.collection('users').add({
+        'username': username,
+        'email': email,
+        'expires_at': expires_at,
+        'is_active': True,
+        'created_at': datetime.now().isoformat()
+    })
+    add_log(f'Добавлен пользователь {username}', f'email: {email}, срок: {expires_at}')
+    flash(f'Пользователь {username} добавлен', 'success')
     return redirect(url_for('users_page'))
 
-@app.route('/toggle_user/<int:user_id>')
+@app.route('/toggle_user/<user_id>')
 def toggle_user(user_id):
     if not session.get('admin'):
         return redirect(url_for('login'))
-    db = get_db()
-    user = db.execute('SELECT is_active FROM users WHERE id=?', (user_id,)).fetchone()
-    if user:
-        new_status = 1 if user['is_active'] == 0 else 0
-        db.execute('UPDATE users SET is_active=? WHERE id=?', (new_status, user_id))
-        db.commit()
-        add_log(f'Изменён статус пользователя ID {user_id}', f'активен: {bool(new_status)}')
-    db.close()
+    user_ref = db.collection('users').document(user_id)
+    user = user_ref.get()
+    if user.exists:
+        current_status = user.to_dict().get('is_active', False)
+        user_ref.update({'is_active': not current_status})
+        add_log(f'Изменён статус пользователя ID {user_id}', f'активен: {not current_status}')
     return redirect(url_for('users_page'))
 
-@app.route('/delete_user/<int:user_id>')
+@app.route('/delete_user/<user_id>')
 def delete_user(user_id):
     if not session.get('admin'):
         return redirect(url_for('login'))
-    db = get_db()
-    db.execute('DELETE FROM users WHERE id=?', (user_id,))
-    db.commit()
+    db.collection('users').document(user_id).delete()
     add_log(f'Удалён пользователь ID {user_id}')
     flash('Пользователь удалён', 'success')
-    db.close()
     return redirect(url_for('users_page'))
 
 @app.route('/finances')
@@ -208,13 +173,14 @@ def add_transaction():
     amount = float(request.form['amount'])
     type_ = request.form['type']
     description = request.form['description']
-    db = get_db()
-    db.execute('INSERT INTO transactions (amount, type, description) VALUES (?, ?, ?)',
-               (amount, type_, description))
-    db.commit()
+    db.collection('transactions').add({
+        'amount': amount,
+        'type': type_,
+        'description': description,
+        'created_at': datetime.now().isoformat()
+    })
     add_log(f'Добавлена транзакция {type_} на {amount}₽', description)
     flash('Транзакция добавлена', 'success')
-    db.close()
     return redirect(url_for('finances_page'))
 
 @app.route('/logs')
@@ -229,28 +195,14 @@ def settings_page():
     if not session.get('admin'):
         return redirect(url_for('login'))
     if request.method == 'POST':
-        # Смена пароля
         new_password = request.form.get('new_password')
         if new_password:
             global ADMIN_PASSWORD_HASH
             ADMIN_PASSWORD_HASH = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
             add_log('Смена пароля администратора')
             flash('Пароль изменён', 'success')
-        # Изменение тарифов
-        monthly = request.form.get('monthly_price')
-        yearly = request.form.get('yearly_price')
-        if monthly and yearly:
-            db = get_db()
-            db.execute('UPDATE settings SET value=? WHERE key="monthly_price"', (monthly,))
-            db.execute('UPDATE settings SET value=? WHERE key="yearly_price"', (yearly,))
-            db.commit()
-            db.close()
-            add_log('Обновлены тарифы')
-            flash('Тарифы сохранены', 'success')
         return redirect(url_for('settings_page'))
-    monthly = get_setting('monthly_price') or '500'
-    yearly = get_setting('yearly_price') or '5000'
-    return render_template('settings.html', monthly_price=monthly, yearly_price=yearly)
+    return render_template('settings.html')
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
