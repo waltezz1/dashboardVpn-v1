@@ -1,6 +1,6 @@
 # app.py
 from flask import Flask, render_template, request, redirect, url_for, session, flash
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import json
 import bcrypt
@@ -10,6 +10,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from dateutil.relativedelta import relativedelta
 import paramiko
 import re
+import calendar
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkeychangeit'
@@ -201,8 +202,30 @@ def dashboard():
         'expense': expense,
         'balance': income - expense
     }
+
+    # Подготовка данных для графика доходов за 30 дней
+    transactions = get_transactions()
+    incomes = [t for t in transactions if t.get('type') == 'income']
+    today = datetime.now().date()
+    date_labels = []
+    date_values = []
+    for i in range(29, -1, -1):
+        date = today - timedelta(days=i)
+        date_str = date.isoformat()
+        date_labels.append(date.strftime('%d.%m'))
+        daily_sum = sum(
+            float(t['amount']) for t in incomes 
+            if t.get('created_at', '').startswith(date_str)
+        )
+        date_values.append(daily_sum)
+
+    income_chart_data = {
+        'labels': date_labels,
+        'values': date_values
+    }
+
     server_status = get_server_status()
-    return render_template('dashboard.html', stats=stats, server=server_status)
+    return render_template('dashboard.html', stats=stats, server=server_status, income_chart_data=income_chart_data)
 
 @app.route('/users')
 def users_page():

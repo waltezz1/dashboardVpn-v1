@@ -3,6 +3,7 @@
 {% block content %}
 <h1 style="font-weight: 300; margin-bottom: 20px; color: #f0f6fc;">Дашборд</h1>
 
+<!-- Карточки статистики -->
 <div class="stats-grid">
     <div class="card">
         <div class="card-title">Всего пользователей</div>
@@ -32,6 +33,19 @@
     </div>
 </div>
 
+<!-- Графики -->
+<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 24px;">
+    <div class="card">
+        <div class="card-title">Доходы за последние 30 дней</div>
+        <canvas id="incomeChart" height="150"></canvas>
+    </div>
+    <div class="card">
+        <div class="card-title">Соотношение пользователей</div>
+        <canvas id="usersChart" height="150"></canvas>
+    </div>
+</div>
+
+<!-- Состояние сервера -->
 <div class="card">
     <div class="card-title">Состояние сервера</div>
     {% if server.available %}
@@ -55,4 +69,64 @@
     <a href="{{ url_for('users_page') }}" class="btn btn-primary">Управление пользователями</a>
     <a href="{{ url_for('finances_page') }}" class="btn btn-primary">Добавить транзакцию</a>
 </div>
+
+<!-- Подключаем Chart.js и скрипт для графиков -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Данные для графика доходов (передаём из Python)
+    const incomeData = {{ income_chart_data|tojson }};
+    const ctx1 = document.getElementById('incomeChart').getContext('2d');
+    new Chart(ctx1, {
+        type: 'line',
+        data: {
+            labels: incomeData.labels,
+            datasets: [{
+                label: 'Доход (₽)',
+                data: incomeData.values,
+                borderColor: '#3fb950',
+                backgroundColor: 'rgba(63, 185, 80, 0.1)',
+                tension: 0.3,
+                fill: true,
+                pointRadius: 3
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                x: { ticks: { color: '#8b949e', maxTicksLimit: 10 } },
+                y: { ticks: { color: '#8b949e' } }
+            }
+        }
+    });
+
+    // Данные для круговой диаграммы пользователей
+    const active = {{ stats.active_users }};
+    const inactive = {{ stats.inactive_users }};
+    const ctx2 = document.getElementById('usersChart').getContext('2d');
+    new Chart(ctx2, {
+        type: 'doughnut',
+        data: {
+            labels: ['Активные', 'Неактивные'],
+            datasets: [{
+                data: [active, inactive],
+                backgroundColor: ['#3fb950', '#f85149'],
+                borderColor: ['#0d1117', '#0d1117'],
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    labels: { color: '#c9d1d9' }
+                }
+            }
+        }
+    });
+});
+</script>
 {% endblock %}
