@@ -96,7 +96,6 @@ def add_log(action, details=''):
 
 # ---------- Работа с тикетами ----------
 def get_tickets(status=None):
-    """Получить все тикеты, опционально фильтруя по статусу (сортировка в памяти)"""
     try:
         tickets_ref = db.collection('tickets')
         if status:
@@ -113,7 +112,6 @@ def get_tickets(status=None):
         return []
 
 def get_ticket(ticket_id):
-    """Получить один тикет по ID"""
     doc_ref = db.collection('tickets').document(ticket_id)
     doc = doc_ref.get()
     if doc.exists:
@@ -123,13 +121,11 @@ def get_ticket(ticket_id):
     return None
 
 def update_ticket_status(ticket_id, new_status):
-    """Обновить статус тикета (new/read/answered/closed)"""
     ticket_ref = db.collection('tickets').document(ticket_id)
     ticket_ref.update({'status': new_status, 'updated_at': datetime.now().isoformat()})
     add_log(f'Изменён статус тикета {ticket_id}', f'новый статус: {new_status}')
 
 def reply_to_ticket(ticket_id, reply_text):
-    """Добавить ответ администратора и обновить статус"""
     ticket_ref = db.collection('tickets').document(ticket_id)
     ticket_ref.update({
         'admin_reply': reply_text,
