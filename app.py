@@ -84,6 +84,26 @@ def add_log(action, details=''):
         'created_at': datetime.now().isoformat()
     })
 
+# ---------- Работа с тикетами ----------
+def get_tickets(status=None):
+    """Получить все тикеты, опционально фильтруя по статусу"""
+    tickets_ref = db.collection('tickets').order_by('created_at', direction=firestore.Query.DESCENDING)
+    if status:
+        tickets_ref = tickets_ref.where(filter=FieldFilter('status', '==', status))
+    docs = tickets_ref.stream()
+    tickets_list = []
+    for doc in docs:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        tickets_list.append(data)
+    return tickets_list
+
+def update_ticket_status(ticket_id, new_status):
+    """Обновить статус тикета (new/read/closed)"""
+    ticket_ref = db.collection('tickets').document(ticket_id)
+    ticket_ref.update({'status': new_status, 'updated_at': datetime.now().isoformat()})
+    add_log(f'Изменён статус тикета {ticket_id}', f'новый статус: {new_status}')
+
 # ---------- Мониторинг состояния сервера ----------
 def get_server_status():
     """Получает состояние сервера по SSH (CPU, RAM, диск, uptime)"""
@@ -224,8 +244,11 @@ def dashboard():
         'values': date_values
     }
 
+    # Считаем количество новых тикетов для отображения в меню (передаём в layout)
+    new_tickets_count = len(get_tickets(status='new'))
+
     server_status = get_server_status()
-    return render_template('dashboard.html', stats=stats, server=server_status, income_chart_data=income_chart_data)
+    return render_template('dashboard.html', stats=stats, server=server_status, income_chart_data=income_chart_data, new_tickets_count=new_tickets_count)
 
 @app.route('/users')
 def users_page():
@@ -388,6 +411,23 @@ def logs_page():
         return redirect(url_for('login'))
     logs = get_logs()
     return render_template('logs.html', logs=logs)
+
+@app.route('/tickets')
+def tickets_page():
+    if not session.get('admin'):
+        return redirect(url_for('login'))
+    status_filter = request.args.get('status')
+    tickets = get_tickets(status=status_filter if status_filter in ('new', 'read', 'closed') else None)
+    return render_template('tickets.html', tickets=tickets, status_filter=status_filter)
+
+@app.route('/ticket/<ticket_id>/<action>')
+def ticket_action(ticket_id, action):
+    if not session.get('admin'):
+        return redirect(url_for('login'))
+    if action in ('read', 'closed'):
+        update_ticket_status(ticket_id, action)
+        flash(f'Статус тикета изменён на {action}', 'success')
+    return redirect(url_for('tickets_page'))
 
 @app.route('/settings', methods=['GET', 'POST'])
 def settings_page():

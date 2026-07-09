@@ -3,18 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VORTEX dashboard</title>
+    <title>VPN Admin</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <header class="header">
         <div class="container">
-            <div class="logo">VORTEX<span>dashboard</span></div>
+            <div class="logo">VPN<span>Admin</span></div>
             <nav class="nav">
                 <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Дашборд</a>
                 <a href="{{ url_for('users_page') }}" class="{% if request.endpoint == 'users_page' %}active{% endif %}">Пользователи</a>
                 <a href="{{ url_for('finances_page') }}" class="{% if request.endpoint == 'finances_page' %}active{% endif %}">Финансы</a>
                 <a href="{{ url_for('logs_page') }}" class="{% if request.endpoint == 'logs_page' %}active{% endif %}">Логи</a>
+                <a href="{{ url_for('tickets_page') }}" class="{% if request.endpoint == 'tickets_page' %}active{% endif %}">
+                    Тикеты
+                    {% if new_tickets_count > 0 %}
+                        <span class="badge badge-danger" style="background: #f85149; color: white; border-radius: 50%; padding: 2px 8px; font-size: 11px; margin-left: 4px;">{{ new_tickets_count }}</span>
+                    {% endif %}
+                </a>
                 <a href="{{ url_for('settings_page') }}" class="{% if request.endpoint == 'settings_page' %}active{% endif %}">Настройки</a>
                 <a href="{{ url_for('logout') }}">Выйти</a>
             </nav>

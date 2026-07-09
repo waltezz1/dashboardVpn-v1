@@ -1,0 +1,32 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<h1 style="font-weight: 300; margin-bottom: 20px; color: #f0f6fc;">Тикеты поддержки</h1>
+
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Пользователь</th>
+                <th>Сообщение</th>
+                <th>Дата</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ticket in tickets %}
+            <tr>
+                <td>{{ ticket.id[:8] }}</td>
+                <td>@{{ ticket.username }}</td>
+                <td>{{ ticket.message[:100] }}{% if ticket.message|length > 100 %}...{% endif %}</td>
+                <td>{{ ticket.created_at }}</td>
+                <td><span class="badge badge-{% if ticket.status == 'new' %}danger{% elif ticket.status == 'in_progress' %}warning{% else %}success{% endif %}">{{ ticket.status }}</span></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" style="text-align:center; padding:20px;">Нет тикетов</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
