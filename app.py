@@ -26,23 +26,21 @@ else:
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# ---------- Контекстный процессор для передачи new_tickets_count во все шаблоны ----------
+# ---------- Контекстный процессор для new_tickets_count ----------
 @app.context_processor
 def inject_new_tickets_count():
     try:
-        # Считаем количество новых тикетов (без сортировки, чтобы не требовать индекс)
         tickets_ref = db.collection('tickets').where(filter=FieldFilter('status', '==', 'new'))
         docs = tickets_ref.stream()
         count = sum(1 for _ in docs)
         return dict(new_tickets_count=count)
-    except Exception as e:
-        # Если ошибка (например, коллекция не существует), просто возвращаем 0
+    except Exception:
         return dict(new_tickets_count=0)
 
-# ---------- Админ-пароль (хеш) ----------
+# ---------- Админ-пароль ----------
 ADMIN_PASSWORD_HASH = bcrypt.hashpw('admin'.encode(), bcrypt.gensalt()).decode()
 
-# ---------- Работа с настройками ----------
+# ---------- Настройки ----------
 def get_setting(key, default=None):
     doc_ref = db.collection('settings').document(key)
     doc = doc_ref.get()
@@ -53,13 +51,12 @@ def get_setting(key, default=None):
 def set_setting(key, value):
     db.collection('settings').document(key).set({'value': value})
 
-# Устанавливаем цены по умолчанию, если их нет
 if not get_setting('monthly_price'):
     set_setting('monthly_price', '500')
 if not get_setting('yearly_price'):
     set_setting('yearly_price', '5000')
 
-# ---------- Вспомогательные функции для работы с Firestore ----------
+# ---------- Работа с пользователями, транзакциями, логами ----------
 def get_users():
     users_ref = db.collection('users')
     docs = users_ref.stream()
@@ -99,7 +96,7 @@ def add_log(action, details=''):
 
 # ---------- Работа с тикетами ----------
 def get_tickets(status=None):
-    """Получить все тикеты, опционально фильтруя по статусу (без сортировки, чтобы не требовать индекс)"""
+    """Получить все тикеты, опционально фильтруя по статусу (сортировка в памяти)"""
     try:
         tickets_ref = db.collection('tickets')
         if status:
@@ -110,22 +107,39 @@ def get_tickets(status=None):
             data = doc.to_dict()
             data['id'] = doc.id
             tickets_list.append(data)
-        # Сортируем в памяти по created_at (убывание)
         tickets_list.sort(key=lambda x: x.get('created_at', ''), reverse=True)
         return tickets_list
-    except Exception as e:
-        # Если коллекция не существует или другая ошибка, возвращаем пустой список
+    except Exception:
         return []
 
+def get_ticket(ticket_id):
+    """Получить один тикет по ID"""
+    doc_ref = db.collection('tickets').document(ticket_id)
+    doc = doc_ref.get()
+    if doc.exists:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        return data
+    return None
+
 def update_ticket_status(ticket_id, new_status):
-    """Обновить статус тикета (new/read/closed)"""
+    """Обновить статус тикета (new/read/answered/closed)"""
     ticket_ref = db.collection('tickets').document(ticket_id)
     ticket_ref.update({'status': new_status, 'updated_at': datetime.now().isoformat()})
     add_log(f'Изменён статус тикета {ticket_id}', f'новый статус: {new_status}')
 
-# ---------- Мониторинг состояния сервера ----------
+def reply_to_ticket(ticket_id, reply_text):
+    """Добавить ответ администратора и обновить статус"""
+    ticket_ref = db.collection('tickets').document(ticket_id)
+    ticket_ref.update({
+        'admin_reply': reply_text,
+        'replied_at': datetime.now().isoformat(),
+        'status': 'answered'
+    })
+    add_log(f'Ответ на тикет {ticket_id}', f'Ответ: {reply_text[:50]}...')
+
+# ---------- Мониторинг сервера ----------
 def get_server_status():
-    """Получает состояние сервера по SSH (CPU, RAM, диск, uptime)"""
     host = os.environ.get('VPS_HOST')
     port = int(os.environ.get('VPS_PORT', 22))
     username = os.environ.get('VPS_USERNAME', 'root')
@@ -144,13 +158,11 @@ def get_server_status():
         else:
             ssh.connect(hostname=host, port=port, username=username, password=password, timeout=5)
 
-        # CPU
         stdin, stdout, stderr = ssh.exec_command("top -bn1 | grep 'Cpu(s)'")
         cpu_line = stdout.read().decode()
         cpu_match = re.search(r'(\d+\.\d+)\s*id', cpu_line)
         cpu_usage = 100 - float(cpu_match.group(1)) if cpu_match else 0
 
-        # RAM
         stdin, stdout, stderr = ssh.exec_command("free -m | grep Mem")
         mem_line = stdout.read().decode()
         mem_parts = mem_line.split()
@@ -161,7 +173,6 @@ def get_server_status():
         else:
             mem_percent = 0
 
-        # Диск
         stdin, stdout, stderr = ssh.exec_command("df -h / | tail -1")
         disk_line = stdout.read().decode()
         disk_parts = disk_line.split()
@@ -170,14 +181,12 @@ def get_server_status():
         else:
             disk_percent = 0
 
-        # Uptime
         stdin, stdout, stderr = ssh.exec_command("uptime -p")
         uptime_line = stdout.read().decode().strip()
         if not uptime_line:
             uptime_line = "неизвестно"
 
         ssh.close()
-
         return {
             'cpu': round(cpu_usage, 1),
             'ram': round(mem_percent, 1),
@@ -186,7 +195,6 @@ def get_server_status():
             'available': True,
             'error': None
         }
-
     except Exception as e:
         return {
             'cpu': 0,
@@ -242,7 +250,6 @@ def dashboard():
         'balance': income - expense
     }
 
-    # Подготовка данных для графика доходов за 30 дней
     transactions = get_transactions()
     incomes = [t for t in transactions if t.get('type') == 'income']
     today = datetime.now().date()
@@ -433,14 +440,32 @@ def tickets_page():
     if not session.get('admin'):
         return redirect(url_for('login'))
     status_filter = request.args.get('status')
-    tickets = get_tickets(status=status_filter if status_filter in ('new', 'read', 'closed') else None)
+    tickets = get_tickets(status=status_filter if status_filter in ('new', 'read', 'answered', 'closed') else None)
     return render_template('tickets.html', tickets=tickets, status_filter=status_filter)
+
+@app.route('/ticket/<ticket_id>', methods=['GET', 'POST'])
+def ticket_detail(ticket_id):
+    if not session.get('admin'):
+        return redirect(url_for('login'))
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        flash('Тикет не найден', 'danger')
+        return redirect(url_for('tickets_page'))
+    if request.method == 'POST':
+        reply_text = request.form.get('reply')
+        if reply_text and reply_text.strip():
+            reply_to_ticket(ticket_id, reply_text.strip())
+            flash('Ответ отправлен', 'success')
+            return redirect(url_for('ticket_detail', ticket_id=ticket_id))
+        else:
+            flash('Введите текст ответа', 'danger')
+    return render_template('ticket_detail.html', ticket=ticket)
 
 @app.route('/ticket/<ticket_id>/<action>')
 def ticket_action(ticket_id, action):
     if not session.get('admin'):
         return redirect(url_for('login'))
-    if action in ('read', 'closed'):
+    if action in ('read', 'answered', 'closed'):
         update_ticket_status(ticket_id, action)
         flash(f'Статус тикета изменён на {action}', 'success')
     return redirect(url_for('tickets_page'))

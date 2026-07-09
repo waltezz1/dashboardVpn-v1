@@ -1,0 +1,52 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<h1 style="font-weight: 300; margin-bottom: 20px; color: #f0f6fc;">Тикет #{{ ticket.id[:8] }}</h1>
+
+<div class="card" style="margin-bottom: 20px;">
+    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <div>
+            <strong>Пользователь:</strong> {{ ticket.get('username', '—') }}<br>
+            <strong>ID:</strong> {{ ticket.get('user_id') }}<br>
+            <strong>Статус:</strong> 
+            {% if ticket.status == 'new' %}
+                <span class="badge badge-danger">Новый</span>
+            {% elif ticket.status == 'answered' %}
+                <span class="badge badge-warning">Отвечен</span>
+            {% elif ticket.status == 'read' %}
+                <span class="badge badge-info">Прочитан</span>
+            {% elif ticket.status == 'closed' %}
+                <span class="badge badge-success">Закрыт</span>
+            {% else %}
+                <span class="badge">{{ ticket.status }}</span>
+            {% endif %}
+        </div>
+        <div>
+            <strong>Создан:</strong> {{ ticket.get('created_at', '—')[:16] }}
+        </div>
+    </div>
+    <div style="margin-top: 16px; padding: 12px; background: #161b22; border-radius: 6px; border-left: 3px solid #58a6ff;">
+        <strong>Сообщение пользователя:</strong><br>
+        {{ ticket.get('message', '—') }}
+    </div>
+    {% if ticket.get('admin_reply') %}
+    <div style="margin-top: 12px; padding: 12px; background: #1c2333; border-radius: 6px; border-left: 3px solid #3fb950;">
+        <strong>Ответ администратора:</strong><br>
+        {{ ticket.admin_reply }}<br>
+        <span style="font-size: 12px; color: #8b949e;">Отвечено: {{ ticket.get('replied_at', '')[:16] }}</span>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3 style="font-weight: 400; margin-bottom: 16px; color: #f0f6fc;">Ответить на тикет</h3>
+    <form method="post">
+        <div class="form-group">
+            <label>Текст ответа</label>
+            <textarea name="reply" class="form-control" rows="4" required placeholder="Введите ответ пользователю..."></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Отправить ответ</button>
+        <a href="{{ url_for('tickets_page') }}" class="btn btn-outline">Назад к списку</a>
+    </form>
+</div>
+{% endblock %}

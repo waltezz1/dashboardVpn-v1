@@ -3,6 +3,14 @@
 {% block content %}
 <h1 style="font-weight: 300; margin-bottom: 20px; color: #f0f6fc;">Тикеты поддержки</h1>
 
+<div style="margin-bottom: 16px;">
+    <a href="{{ url_for('tickets_page') }}" class="btn btn-outline" style="margin-right: 8px;">Все</a>
+    <a href="{{ url_for('tickets_page', status='new') }}" class="btn btn-outline" style="margin-right: 8px;">Новые</a>
+    <a href="{{ url_for('tickets_page', status='read') }}" class="btn btn-outline" style="margin-right: 8px;">Прочитанные</a>
+    <a href="{{ url_for('tickets_page', status='answered') }}" class="btn btn-outline" style="margin-right: 8px;">Отвеченные</a>
+    <a href="{{ url_for('tickets_page', status='closed') }}" class="btn btn-outline">Закрытые</a>
+</div>
+
 <div class="table-wrap">
     <table>
         <thead>
@@ -12,19 +20,44 @@
                 <th>Сообщение</th>
                 <th>Дата</th>
                 <th>Статус</th>
+                <th>Действия</th>
             </tr>
         </thead>
         <tbody>
             {% for ticket in tickets %}
             <tr>
                 <td>{{ ticket.id[:8] }}</td>
-                <td>@{{ ticket.username }}</td>
-                <td>{{ ticket.message[:100] }}{% if ticket.message|length > 100 %}...{% endif %}</td>
-                <td>{{ ticket.created_at }}</td>
-                <td><span class="badge badge-{% if ticket.status == 'new' %}danger{% elif ticket.status == 'in_progress' %}warning{% else %}success{% endif %}">{{ ticket.status }}</span></td>
+                <td>{{ ticket.get('username', '—') }}<br><small>{{ ticket.get('user_id') }}</small></td>
+                <td>{{ ticket.get('message', '')[:100] }}{% if ticket.get('message', '').length > 100 %}…{% endif %}</td>
+                <td>{{ ticket.get('created_at', '')[:16] }}</td>
+                <td>
+                    {% if ticket.status == 'new' %}
+                        <span class="badge badge-danger">Новый</span>
+                    {% elif ticket.status == 'answered' %}
+                        <span class="badge badge-warning">Отвечен</span>
+                    {% elif ticket.status == 'read' %}
+                        <span class="badge badge-info">Прочитан</span>
+                    {% elif ticket.status == 'closed' %}
+                        <span class="badge badge-success">Закрыт</span>
+                    {% else %}
+                        <span class="badge">{{ ticket.status }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="{{ url_for('ticket_detail', ticket_id=ticket.id) }}" class="btn btn-sm btn-primary">Ответить</a>
+                    {% if ticket.status == 'new' %}
+                        <a href="{{ url_for('ticket_action', ticket_id=ticket.id, action='read') }}" class="btn btn-sm btn-outline">Прочитано</a>
+                    {% endif %}
+                    {% if ticket.status == 'answered' or ticket.status == 'read' %}
+                        <a href="{{ url_for('ticket_action', ticket_id=ticket.id, action='closed') }}" class="btn btn-sm btn-danger">Закрыть</a>
+                    {% endif %}
+                    {% if ticket.status == 'closed' %}
+                        <span style="color: #8b949e;">Закрыт</span>
+                    {% endif %}
+                </td>
             </tr>
             {% else %}
-            <tr><td colspan="5" style="text-align:center; padding:20px;">Нет тикетов</td></tr>
+            <tr><td colspan="6" style="text-align:center; padding:20px;">Нет тикетов</td></tr>
             {% endfor %}
         </tbody>
     </table>
