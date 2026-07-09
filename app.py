@@ -26,6 +26,19 @@ else:
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
+# ---------- Контекстный процессор для передачи new_tickets_count во все шаблоны ----------
+@app.context_processor
+def inject_new_tickets_count():
+    try:
+        # Считаем количество новых тикетов (без сортировки, чтобы не требовать индекс)
+        tickets_ref = db.collection('tickets').where(filter=FieldFilter('status', '==', 'new'))
+        docs = tickets_ref.stream()
+        count = sum(1 for _ in docs)
+        return dict(new_tickets_count=count)
+    except Exception as e:
+        # Если ошибка (например, коллекция не существует), просто возвращаем 0
+        return dict(new_tickets_count=0)
+
 # ---------- Админ-пароль (хеш) ----------
 ADMIN_PASSWORD_HASH = bcrypt.hashpw('admin'.encode(), bcrypt.gensalt()).decode()
 
@@ -86,17 +99,23 @@ def add_log(action, details=''):
 
 # ---------- Работа с тикетами ----------
 def get_tickets(status=None):
-    """Получить все тикеты, опционально фильтруя по статусу"""
-    tickets_ref = db.collection('tickets').order_by('created_at', direction=firestore.Query.DESCENDING)
-    if status:
-        tickets_ref = tickets_ref.where(filter=FieldFilter('status', '==', status))
-    docs = tickets_ref.stream()
-    tickets_list = []
-    for doc in docs:
-        data = doc.to_dict()
-        data['id'] = doc.id
-        tickets_list.append(data)
-    return tickets_list
+    """Получить все тикеты, опционально фильтруя по статусу (без сортировки, чтобы не требовать индекс)"""
+    try:
+        tickets_ref = db.collection('tickets')
+        if status:
+            tickets_ref = tickets_ref.where(filter=FieldFilter('status', '==', status))
+        docs = tickets_ref.stream()
+        tickets_list = []
+        for doc in docs:
+            data = doc.to_dict()
+            data['id'] = doc.id
+            tickets_list.append(data)
+        # Сортируем в памяти по created_at (убывание)
+        tickets_list.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        return tickets_list
+    except Exception as e:
+        # Если коллекция не существует или другая ошибка, возвращаем пустой список
+        return []
 
 def update_ticket_status(ticket_id, new_status):
     """Обновить статус тикета (new/read/closed)"""
@@ -244,11 +263,8 @@ def dashboard():
         'values': date_values
     }
 
-    # Считаем количество новых тикетов для отображения в меню (передаём в layout)
-    new_tickets_count = len(get_tickets(status='new'))
-
     server_status = get_server_status()
-    return render_template('dashboard.html', stats=stats, server=server_status, income_chart_data=income_chart_data, new_tickets_count=new_tickets_count)
+    return render_template('dashboard.html', stats=stats, server=server_status, income_chart_data=income_chart_data)
 
 @app.route('/users')
 def users_page():
