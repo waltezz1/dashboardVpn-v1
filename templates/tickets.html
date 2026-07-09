@@ -28,7 +28,7 @@
             <tr>
                 <td>{{ ticket.id[:8] }}</td>
                 <td>{{ ticket.get('username', '—') }}<br><small>{{ ticket.get('user_id') }}</small></td>
-                <td>{{ ticket.get('message', '')[:100] }}{% if ticket.get('message', '').length > 100 %}…{% endif %}</td>
+                <td>{{ ticket.get('message', '')[:100] }}{% if ticket.get('message', '')|length > 100 %}…{% endif %}</td>
                 <td>{{ ticket.get('created_at', '')[:16] }}</td>
                 <td>
                     {% if ticket.status == 'new' %}
