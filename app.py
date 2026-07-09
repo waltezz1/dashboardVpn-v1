@@ -11,6 +11,7 @@ from dateutil.relativedelta import relativedelta
 import paramiko
 import re
 import calendar
+import requests  # для отправки в Telegram
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkeychangeit'
@@ -55,6 +56,26 @@ if not get_setting('monthly_price'):
     set_setting('monthly_price', '500')
 if not get_setting('yearly_price'):
     set_setting('yearly_price', '5000')
+
+# ---------- Отправка сообщений в Telegram ----------
+def send_telegram_message(chat_id, text):
+    """Отправить сообщение пользователю через Telegram бота"""
+    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    if not token:
+        print("Ошибка: TELEGRAM_BOT_TOKEN не задан")
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'HTML'
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Ошибка отправки сообщения в Telegram: {e}")
+        return False
 
 # ---------- Работа с пользователями, транзакциями, логами ----------
 def get_users():
@@ -126,6 +147,7 @@ def update_ticket_status(ticket_id, new_status):
     add_log(f'Изменён статус тикета {ticket_id}', f'новый статус: {new_status}')
 
 def reply_to_ticket(ticket_id, reply_text):
+    """Добавить ответ администратора, обновить статус и отправить пользователю"""
     ticket_ref = db.collection('tickets').document(ticket_id)
     ticket_ref.update({
         'admin_reply': reply_text,
@@ -133,6 +155,14 @@ def reply_to_ticket(ticket_id, reply_text):
         'status': 'answered'
     })
     add_log(f'Ответ на тикет {ticket_id}', f'Ответ: {reply_text[:50]}...')
+    
+    # Отправка пользователю
+    ticket = get_ticket(ticket_id)
+    if ticket:
+        user_id = ticket.get('user_id')
+        if user_id:
+            msg = f"✅ Администратор ответил на ваш запрос:\n\n{reply_text}"
+            send_telegram_message(user_id, msg)
 
 # ---------- Мониторинг сервера ----------
 def get_server_status():
