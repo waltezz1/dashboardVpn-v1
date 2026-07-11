@@ -11,7 +11,7 @@ from dateutil.relativedelta import relativedelta
 import paramiko
 import re
 import calendar
-import requests  # для отправки в Telegram
+import requests
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkeychangeit'
@@ -56,26 +56,6 @@ if not get_setting('monthly_price'):
     set_setting('monthly_price', '500')
 if not get_setting('yearly_price'):
     set_setting('yearly_price', '5000')
-
-# ---------- Отправка сообщений в Telegram ----------
-def send_telegram_message(chat_id, text):
-    """Отправить сообщение пользователю через Telegram бота"""
-    token = os.environ.get('TELEGRAM_BOT_TOKEN')
-    if not token:
-        print("Ошибка: TELEGRAM_BOT_TOKEN не задан")
-        return False
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        'chat_id': chat_id,
-        'text': text,
-        'parse_mode': 'HTML'
-    }
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Ошибка отправки сообщения в Telegram: {e}")
-        return False
 
 # ---------- Работа с пользователями, транзакциями, логами ----------
 def get_users():
@@ -147,7 +127,6 @@ def update_ticket_status(ticket_id, new_status):
     add_log(f'Изменён статус тикета {ticket_id}', f'новый статус: {new_status}')
 
 def reply_to_ticket(ticket_id, reply_text):
-    """Добавить ответ администратора, обновить статус и отправить пользователю"""
     ticket_ref = db.collection('tickets').document(ticket_id)
     ticket_ref.update({
         'admin_reply': reply_text,
@@ -155,14 +134,45 @@ def reply_to_ticket(ticket_id, reply_text):
         'status': 'answered'
     })
     add_log(f'Ответ на тикет {ticket_id}', f'Ответ: {reply_text[:50]}...')
-    
-    # Отправка пользователю
     ticket = get_ticket(ticket_id)
     if ticket:
         user_id = ticket.get('user_id')
         if user_id:
             msg = f"✅ Администратор ответил на ваш запрос:\n\n{reply_text}"
             send_telegram_message(user_id, msg)
+
+# ---------- Отправка сообщений в Telegram ----------
+def send_telegram_message(chat_id, text):
+    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    if not token:
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'HTML'
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+def get_telegram_file_url(file_id):
+    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    if not token:
+        return None
+    url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+    try:
+        resp = requests.get(url)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data['ok']:
+                file_path = data['result']['file_path']
+                return f"https://api.telegram.org/file/bot{token}/{file_path}"
+    except:
+        pass
+    return None
 
 # ---------- Мониторинг сервера ----------
 def get_server_status():
@@ -231,6 +241,42 @@ def get_server_status():
             'error': str(e)
         }
 
+def get_wg_connections():
+    host = os.environ.get('VPS_HOST')
+    port = int(os.environ.get('VPS_PORT', 22))
+    username = os.environ.get('VPS_USERNAME', 'root')
+    password = os.environ.get('VPS_PASSWORD')
+    private_key_path = os.environ.get('VPS_SSH_KEY_PATH')
+    if not host or not password:
+        return 0
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        if private_key_path:
+            key = paramiko.RSAKey.from_private_key_file(private_key_path)
+            ssh.connect(hostname=host, port=port, username=username, pkey=key, timeout=5)
+        else:
+            ssh.connect(hostname=host, port=port, username=username, password=password, timeout=5)
+        stdin, stdout, stderr = ssh.exec_command("wg show | grep 'peer' | wc -l")
+        output = stdout.read().decode().strip()
+        ssh.close()
+        return int(output) if output else 0
+    except:
+        return 0
+
+def get_users_chart_data():
+    users = get_users()
+    today = datetime.now().date()
+    date_labels = []
+    date_values = []
+    for i in range(29, -1, -1):
+        date = today - timedelta(days=i)
+        date_str = date.isoformat()
+        date_labels.append(date.strftime('%d.%m'))
+        count = sum(1 for u in users if u.get('created_at', '').startswith(date_str))
+        date_values.append(count)
+    return {'labels': date_labels, 'values': date_values}
+
 # ---------- Маршруты ----------
 @app.route('/')
 def index():
@@ -295,9 +341,19 @@ def dashboard():
         'labels': date_labels,
         'values': date_values
     }
+    users_chart_data = get_users_chart_data()
+    wg_connections = get_wg_connections()
+    # Трафик пока заглушка
+    traffic_chart_data = {'labels': ['Загрузка...'], 'values': [0]}
 
     server_status = get_server_status()
-    return render_template('dashboard.html', stats=stats, server=server_status, income_chart_data=income_chart_data)
+    return render_template('dashboard.html', 
+        stats=stats, 
+        server=server_status, 
+        income_chart_data=income_chart_data,
+        users_chart_data=users_chart_data,
+        traffic_chart_data=traffic_chart_data,
+        wg_connections=wg_connections)
 
 @app.route('/users')
 def users_page():
@@ -494,6 +550,33 @@ def ticket_action(ticket_id, action):
     if action in ('read', 'answered', 'closed'):
         update_ticket_status(ticket_id, action)
         flash(f'Статус тикета изменён на {action}', 'success')
+    return redirect(url_for('tickets_page'))
+
+@app.route('/ticket/download/<ticket_id>')
+def ticket_download(ticket_id):
+    if not session.get('admin'):
+        return redirect(url_for('login'))
+    ticket = get_ticket(ticket_id)
+    if not ticket or not ticket.get('file_id'):
+        flash('Файл не найден', 'danger')
+        return redirect(url_for('tickets_page'))
+    file_id = ticket['file_id']
+    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    if not token:
+        flash('Токен бота не настроен', 'danger')
+        return redirect(url_for('tickets_page'))
+    url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
+    try:
+        resp = requests.get(url)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data['ok']:
+                file_path = data['result']['file_path']
+                download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+                return redirect(download_url)
+    except Exception:
+        pass
+    flash('Ошибка загрузки файла', 'danger')
     return redirect(url_for('tickets_page'))
 
 @app.route('/settings', methods=['GET', 'POST'])

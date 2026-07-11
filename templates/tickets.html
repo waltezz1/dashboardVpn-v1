@@ -18,6 +18,7 @@
                 <th>ID</th>
                 <th>Пользователь</th>
                 <th>Сообщение</th>
+                <th>Вложение</th>
                 <th>Дата</th>
                 <th>Статус</th>
                 <th>Действия</th>
@@ -31,6 +32,13 @@
                 <td>
                     {{ ticket.get('message', '')[:100] }}
                     {% if ticket.get('message', '')|length > 100 %}…{% endif %}
+                </td>
+                <td>
+                    {% if ticket.get('file_id') %}
+                        <a href="{{ url_for('ticket_download', ticket_id=ticket.id) }}" target="_blank" class="btn btn-sm btn-outline">📎 Скачать</a>
+                    {% else %}
+                        —
+                    {% endif %}
                 </td>
                 <td>{{ ticket.get('created_at', '')[:16] }}</td>
                 <td>
@@ -60,7 +68,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="6" style="text-align:center; padding:20px;">Нет тикетов</td></tr>
+            <tr><td colspan="7" style="text-align:center; padding:20px;">Нет тикетов</td></tr>
             {% endfor %}
         </tbody>
     </table>

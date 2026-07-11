@@ -25,10 +25,26 @@
             <strong>Создан:</strong> {{ ticket.get('created_at', '—')[:16] }}
         </div>
     </div>
+
     <div style="margin-top: 16px; padding: 12px; background: #161b22; border-radius: 6px; border-left: 3px solid #58a6ff;">
         <strong>Сообщение пользователя:</strong><br>
         {{ ticket.get('message', '—') }}
     </div>
+
+    {% if ticket.get('file_id') %}
+    <div style="margin-top: 12px; padding: 12px; background: #1c2333; border-radius: 6px; border-left: 3px solid #d29922;">
+        <strong>Вложение:</strong><br>
+        <a href="{{ url_for('ticket_download', ticket_id=ticket.id) }}" target="_blank" class="btn btn-sm btn-primary">📎 Скачать файл</a>
+        {% if ticket.get('file_type') == 'photo' %}
+            <br><small style="color: #8b949e;">Тип: Фото</small>
+        {% elif ticket.get('file_type') == 'document' %}
+            <br><small style="color: #8b949e;">Тип: Документ</small>
+        {% else %}
+            <br><small style="color: #8b949e;">Тип: {{ ticket.get('file_type', 'файл') }}</small>
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% if ticket.get('admin_reply') %}
     <div style="margin-top: 12px; padding: 12px; background: #1c2333; border-radius: 6px; border-left: 3px solid #3fb950;">
         <strong>Ответ администратора:</strong><br>
