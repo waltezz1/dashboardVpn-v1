@@ -30,8 +30,8 @@
                 <td>{{ ticket.id[:8] }}</td>
                 <td>{{ ticket.get('username', '—') }}<br><small>{{ ticket.get('user_id') }}</small></td>
                 <td>
-                    {{ ticket.get('message', '')[:100] }}
-                    {% if ticket.get('message', '')|length > 100 %}…{% endif %}
+                    {{ (ticket.get('message') or '')[:100] }}
+                    {% if (ticket.get('message') or '')|length > 100 %}…{% endif %}
                 </td>
                 <td>
                     {% if ticket.get('file_id') %}
